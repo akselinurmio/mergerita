@@ -10,10 +10,12 @@ import {
 
 export async function handlePullRequest(payload: PullRequestEvent, env: Env) {
   if (payload.action !== "opened" && payload.action !== "reopened") {
+    console.log(`Skipped: action is "${payload.action}", not opened/reopened`);
     return;
   }
 
   if (payload.pull_request.user.login !== "dependabot[bot]") {
+    console.log(`Skipped: author is "${payload.pull_request.user.login}", not dependabot[bot]`);
     return;
   }
 

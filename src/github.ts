@@ -12,12 +12,14 @@ export async function getInstallationToken(
   env: { APP_ID: string; PRIVATE_KEY: string },
   installationId: number,
 ): Promise<string> {
+  console.log(`Authenticating as installation ${installationId}`);
   const auth = createAppAuth({
     appId: env.APP_ID,
     privateKey: env.PRIVATE_KEY,
     installationId,
   });
   const { token } = await auth({ type: "installation" });
+  console.log("Installation token obtained");
   return token;
 }
 
@@ -48,13 +50,18 @@ export async function enableAutoMerge(
   });
 
   if (!res.ok) {
-    throw new Error(`Failed to enable auto-merge: ${res.status} ${await res.text()}`);
+    const body = await res.text();
+    console.error(`enableAutoMerge HTTP error: ${res.status} ${body}`);
+    throw new Error(`Failed to enable auto-merge: ${res.status} ${body}`);
   }
 
   const data: { errors?: Array<{ message: string }> } = await res.json();
   if (data.errors) {
+    console.error("enableAutoMerge GraphQL errors:", JSON.stringify(data.errors));
     throw new Error(`GraphQL errors: ${data.errors.map((e) => e.message).join(", ")}`);
   }
+
+  console.log("enableAutoMerge succeeded");
 }
 
 export async function createComment(
