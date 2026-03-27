@@ -2,8 +2,9 @@ import type { PullRequestEvent } from "@octokit/webhooks-types";
 import { getInstallationToken, enableAutoMerge } from "./github";
 
 export async function handlePullRequest(payload: PullRequestEvent, env: Cloudflare.Env) {
-  if (payload.action !== "opened" && payload.action !== "reopened") {
-    console.log(`Skipped: action is "${payload.action}", not opened/reopened`);
+  const handledActions = ["opened", "reopened", "synchronize"];
+  if (!handledActions.includes(payload.action)) {
+    console.log(`Skipped: action is "${payload.action}", not one of ${handledActions.join("/")}`);
     return;
   }
 

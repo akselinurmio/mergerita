@@ -2,14 +2,14 @@
 
 GitHub App that auto-merges Dependabot PRs in your repositories.
 
-When Dependabot opens a pull request, Mergerita enables GitHub's native auto-merge. GitHub then merges the PR once all required status checks pass.
+When Dependabot opens or updates a pull request, Mergerita enables GitHub's native auto-merge. GitHub then merges the PR once all required status checks pass.
 
 Hosted on Cloudflare Workers (free plan).
 
 ## How it works
 
-1. Dependabot opens a PR
-2. GitHub sends a `pull_request.opened` webhook to Mergerita
+1. Dependabot opens or pushes new commits to a PR
+2. GitHub sends a `pull_request` webhook to Mergerita (`opened`, `reopened`, or `synchronize`)
 3. Mergerita verifies the webhook signature
 4. Mergerita checks that the PR author is `dependabot[bot]`
 5. Mergerita enables auto-merge (squash)
