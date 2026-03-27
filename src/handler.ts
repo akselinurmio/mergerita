@@ -1,6 +1,12 @@
 import type { PullRequestEvent } from "@octokit/webhooks-types";
 import type { Env } from "./types";
-import { getInstallationToken, enableAutoMerge } from "./github";
+import {
+  getInstallationToken,
+  enableAutoMerge,
+  createComment,
+  findBotComment,
+  deleteComment,
+} from "./github";
 
 export async function handlePullRequest(payload: PullRequestEvent, env: Env) {
   if (payload.action !== "opened" && payload.action !== "reopened") {
@@ -18,9 +24,29 @@ export async function handlePullRequest(payload: PullRequestEvent, env: Env) {
   const token = await getInstallationToken(env, payload.installation.id);
   const [owner, repo] = payload.repository.full_name.split("/");
 
-  console.log(`Processing Dependabot PR #${payload.pull_request.number} in ${owner}/${repo}`);
+  const prNumber = payload.pull_request.number;
 
-  await enableAutoMerge(token, payload.pull_request.node_id);
+  console.log(`Processing Dependabot PR #${prNumber} in ${owner}/${repo}`);
 
-  console.log(`Auto-merge enabled for PR #${payload.pull_request.number}`);
+  try {
+    await enableAutoMerge(token, payload.pull_request.node_id);
+    console.log(`Auto-merge enabled for PR #${prNumber}`);
+
+    const existingComment = await findBotComment(token, env.APP_ID, owner, repo, prNumber);
+    if (existingComment) {
+      await deleteComment(token, owner, repo, existingComment);
+      console.log(`Deleted setup comment on PR #${prNumber}`);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`Failed to enable auto-merge for PR #${prNumber}:`, message);
+
+    await createComment(
+      token,
+      owner,
+      repo,
+      prNumber,
+`**Mergerita could not enable auto-merge:** ${message}\n\nEnsure **Allow auto-merge** is enabled in repo settings and a branch protection rule with required status checks exists on the base branch. Then close and reopen this PR to retry.`,
+    );
+  }
 }

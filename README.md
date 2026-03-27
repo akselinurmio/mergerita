@@ -59,6 +59,7 @@ Go to **[github.com/settings/apps/new](https://github.com/settings/apps/new)** a
 |---|---|
 | Contents | Read & write |
 | Metadata | Read-only |
+| Pull requests | Read & write |
 
 **Subscribe to events:**
 

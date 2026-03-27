@@ -56,3 +56,83 @@ export async function enableAutoMerge(
     throw new Error(`GraphQL errors: ${data.errors.map((e) => e.message).join(", ")}`);
   }
 }
+
+export async function createComment(
+  token: string,
+  owner: string,
+  repo: string,
+  prNumber: number,
+  body: string,
+): Promise<void> {
+  const res = await fetch(
+    `${GITHUB_API}/repos/${owner}/${repo}/issues/${prNumber}/comments`,
+    {
+      method: "POST",
+      headers: {
+        ...HEADERS,
+        Authorization: `bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ body }),
+    },
+  );
+
+  if (!res.ok) {
+    throw new Error(`Failed to create comment: ${res.status} ${await res.text()}`);
+  }
+}
+
+export async function findBotComment(
+  token: string,
+  appId: string,
+  owner: string,
+  repo: string,
+  prNumber: number,
+): Promise<number | null> {
+  const res = await fetch(
+    `${GITHUB_API}/repos/${owner}/${repo}/issues/${prNumber}/comments`,
+    {
+      headers: {
+        ...HEADERS,
+        Authorization: `bearer ${token}`,
+      },
+    },
+  );
+
+  if (!res.ok) {
+    throw new Error(`Failed to list comments: ${res.status} ${await res.text()}`);
+  }
+
+  const comments: Array<{
+    id: number;
+    performed_via_github_app?: { id: number } | null;
+  }> = await res.json();
+
+  const appIdNum = Number(appId);
+  const comment = comments.find(
+    (c) => c.performed_via_github_app?.id === appIdNum,
+  );
+  return comment?.id ?? null;
+}
+
+export async function deleteComment(
+  token: string,
+  owner: string,
+  repo: string,
+  commentId: number,
+): Promise<void> {
+  const res = await fetch(
+    `${GITHUB_API}/repos/${owner}/${repo}/issues/comments/${commentId}`,
+    {
+      method: "DELETE",
+      headers: {
+        ...HEADERS,
+        Authorization: `bearer ${token}`,
+      },
+    },
+  );
+
+  if (!res.ok) {
+    throw new Error(`Failed to delete comment: ${res.status} ${await res.text()}`);
+  }
+}
