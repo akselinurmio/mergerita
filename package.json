@@ -1,0 +1,22 @@
+{
+  "name": "mergerita",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@octokit/auth-app": "^8.2.0",
+    "@octokit/webhooks-methods": "^6.0.0",
+    "hono": "^4.12.9"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260317.1",
+    "@octokit/webhooks-types": "^7.6.1",
+    "typescript": "^6.0.2",
+    "wrangler": "^4.77.0"
+  }
+}
