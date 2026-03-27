@@ -9,7 +9,7 @@ const HEADERS = {
 };
 
 export async function getInstallationToken(
-  env: { APP_ID: string; PRIVATE_KEY: string },
+  env: Pick<Cloudflare.Env, "APP_ID" | "PRIVATE_KEY">,
   installationId: number,
 ): Promise<string> {
   console.log(`Authenticating as installation ${installationId}`);
