@@ -1,0 +1,21 @@
+{
+  "name": "mergerita",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-02-24",
+  "assets": {
+    "directory": "./public"
+  },
+  "observability": {
+    "enabled": false,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "persist": true,
+      "invocation_logs": true
+    }
+  },
+  // Validated before deployment — must be set via `wrangler secret put`
+  "secrets": {
+    "required": ["WEBHOOK_SECRET", "APP_ID", "PRIVATE_KEY"]
+  }
+}
