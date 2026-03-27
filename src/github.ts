@@ -21,26 +21,6 @@ export async function getInstallationToken(
   return token;
 }
 
-export async function approvePullRequest(
-  token: string,
-  owner: string,
-  repo: string,
-  pullNumber: number,
-): Promise<void> {
-  const res = await fetch(
-    `${GITHUB_API}/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`,
-    {
-      method: "POST",
-      headers: { ...HEADERS, Authorization: `token ${token}` },
-      body: JSON.stringify({ event: "APPROVE" }),
-    },
-  );
-
-  if (!res.ok) {
-    throw new Error(`Failed to approve PR: ${res.status} ${await res.text()}`);
-  }
-}
-
 export async function enableAutoMerge(
   token: string,
   pullRequestNodeId: string,

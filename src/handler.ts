@@ -1,6 +1,6 @@
 import type { PullRequestEvent } from "@octokit/webhooks-types";
 import type { Env } from "./types";
-import { getInstallationToken, approvePullRequest, enableAutoMerge } from "./github";
+import { getInstallationToken, enableAutoMerge } from "./github";
 
 export async function handlePullRequest(payload: PullRequestEvent, env: Env) {
   if (payload.action !== "opened" && payload.action !== "reopened") {
@@ -20,7 +20,6 @@ export async function handlePullRequest(payload: PullRequestEvent, env: Env) {
 
   console.log(`Processing Dependabot PR #${payload.pull_request.number} in ${owner}/${repo}`);
 
-  await approvePullRequest(token, owner, repo, payload.pull_request.number);
   await enableAutoMerge(token, payload.pull_request.node_id);
 
   console.log(`Auto-merge enabled for PR #${payload.pull_request.number}`);
