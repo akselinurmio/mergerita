@@ -28,9 +28,9 @@ export async function handleWebhook(c: Context<{ Bindings: Env }>) {
     console.log(`pull_request.${action} PR #${pull_request?.number} in ${repository?.full_name} by ${pull_request?.user?.login}`);
 
     c.executionCtx.waitUntil(handlePullRequest(payload, c.env));
-    return c.json({ ok: true });
+  } else {
+    console.log(`Ignored event: ${event}`);
   }
 
-  console.log(`Ignored event: ${event}`);
-  return c.json({ ignored: true, event });
+  return c.text("OK");
 }
