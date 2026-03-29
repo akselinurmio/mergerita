@@ -9,6 +9,9 @@ declare namespace Cloudflare {
 		WEBHOOK_SECRET: string;
 		APP_ID: string;
 		PRIVATE_KEY: string;
+		CLIENT_ID: string;
+		CLIENT_SECRET: string;
+		SESSIONS_KV: KVNamespace;
 	}
 }
 interface Env extends Cloudflare.Env {}
