@@ -1,65 +1,22 @@
-import { createAppAuth } from "@octokit/auth-app";
-
-const GITHUB_API = "https://api.github.com";
-
-const HEADERS = {
-  Accept: "application/vnd.github+json",
-  "User-Agent": "mergerita",
-  "X-GitHub-Api-Version": "2026-03-10",
-};
-
-export async function getInstallationToken(
-  env: Pick<Cloudflare.Env, "APP_ID" | "PRIVATE_KEY">,
-  installationId: number,
-): Promise<string> {
-  console.log(`Authenticating as installation ${installationId}`);
-  const auth = createAppAuth({
-    appId: env.APP_ID,
-    privateKey: env.PRIVATE_KEY,
-    installationId,
-  });
-  const { token } = await auth({ type: "installation" });
-  console.log("Installation token obtained");
-  return token;
-}
+import type { Octokit } from "octokit";
 
 export async function enableAutoMerge(
-  token: string,
+  octokit: Octokit,
   pullRequestNodeId: string,
 ): Promise<void> {
-  const res = await fetch(`${GITHUB_API}/graphql`, {
-    method: "POST",
-    headers: {
-      ...HEADERS,
-      Authorization: `bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      query: `mutation EnableAutoMerge($prId: ID!) {
-        enablePullRequestAutoMerge(input: {
-          pullRequestId: $prId
-          mergeMethod: SQUASH
-        }) {
-          pullRequest {
-            autoMergeRequest { enabledAt }
-          }
+  await octokit.graphql(
+    `mutation EnableAutoMerge($prId: ID!) {
+      enablePullRequestAutoMerge(input: {
+        pullRequestId: $prId
+        mergeMethod: SQUASH
+      }) {
+        pullRequest {
+          autoMergeRequest { enabledAt }
         }
-      }`,
-      variables: { prId: pullRequestNodeId },
-    }),
-  });
-
-  if (!res.ok) {
-    const body = await res.text();
-    console.error(`enableAutoMerge HTTP error: ${res.status} ${body}`);
-    throw new Error(`Failed to enable auto-merge: ${res.status} ${body}`);
-  }
-
-  const data: { errors?: Array<{ message: string }> } = await res.json();
-  if (data.errors) {
-    console.error("enableAutoMerge GraphQL errors:", JSON.stringify(data.errors));
-    throw new Error(`GraphQL errors: ${data.errors.map((e) => e.message).join(", ")}`);
-  }
+      }
+    }`,
+    { prId: pullRequestNodeId },
+  );
 
   console.log("enableAutoMerge succeeded");
 }

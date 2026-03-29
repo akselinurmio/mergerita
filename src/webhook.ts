@@ -1,6 +1,6 @@
 import type { Context } from "hono";
-import { verify } from "@octokit/webhooks-methods";
-import { handlePullRequest } from "./handler";
+import { App } from "octokit";
+import { enableAutoMerge } from "./github";
 
 export async function handleWebhook(c: Context<{ Bindings: Env }>) {
   const deliveryId = c.req.header("x-github-delivery");
@@ -15,22 +15,40 @@ export async function handleWebhook(c: Context<{ Bindings: Env }>) {
   }
 
   const body = await c.req.text();
-  const isValid = await verify(c.env.WEBHOOK_SECRET, body, signature);
+
+  const app = new App({
+    appId: c.env.APP_ID,
+    privateKey: c.env.PRIVATE_KEY,
+    webhooks: { secret: c.env.WEBHOOK_SECRET },
+  });
+
+  const isValid = await app.webhooks.verify(body, signature);
   if (!isValid) {
     console.log("Rejected: invalid signature");
     return c.text("Invalid signature", 401);
   }
 
-  const payload = JSON.parse(body);
+  app.webhooks.on(
+    ["pull_request.opened", "pull_request.reopened", "pull_request.synchronize"],
+    async ({ octokit, payload }) => {
+      if (payload.pull_request.user?.login !== "dependabot[bot]") {
+        console.log(`Skipped: author is "${payload.pull_request.user?.login ?? "unknown"}", not dependabot[bot]`);
+        return;
+      }
 
-  if (event === "pull_request") {
-    const { action, pull_request, repository } = payload;
-    console.log(`pull_request.${action} PR #${pull_request?.number} in ${repository?.full_name} by ${pull_request?.user?.login}`);
+      const [owner, repo] = payload.repository.full_name.split("/");
+      console.log(`Processing Dependabot PR #${payload.pull_request.number} in ${owner}/${repo}`);
 
-    c.executionCtx.waitUntil(handlePullRequest(payload, c.env));
-  } else {
-    console.log(`Ignored event: ${event}`);
-  }
+      await enableAutoMerge(octokit, payload.pull_request.node_id);
+      console.log(`Auto-merge enabled for PR #${payload.pull_request.number}`);
+    },
+  );
+
+  c.executionCtx.waitUntil(
+    app.webhooks
+      .verifyAndReceive({ id: deliveryId ?? "", name: event ?? "", payload: body, signature })
+      .catch((error: unknown) => console.error("Handler error:", error)),
+  );
 
   return c.text("OK");
 }
