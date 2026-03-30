@@ -1,15 +1,17 @@
 import { Hono } from "hono";
 import { html } from "hono/html";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
-import { App, Octokit } from "octokit";
+import { App } from "octokit";
+import { exchangeOAuthCode, revokeOAuthToken, fetchAuthenticatedLogin, fetchAllRepos } from "./github";
+import type { RepoGql, RepoInfo } from "./github";
 
 interface Session {
-  token: string;
+  accessToken: string;
 }
 
 interface SubStatuses {
-  autoMerge: boolean | null;    // null = unknown (API error / permission denied)
-  hasProtection: boolean | null; // null = unknown
+  autoMerge: boolean | null;
+  hasProtection: boolean | null;
 }
 
 type OverallStatus = "good" | "setup-needed" | "unknown";
@@ -26,10 +28,46 @@ const SESSION_COOKIE = "sid";
 const SESSION_TTL = 28800; // 8 hours
 const STATE_TTL = 600;     // 10 minutes
 
+function base64urlEncode(bytes: Uint8Array): string {
+  let str = "";
+  for (const byte of bytes) str += String.fromCharCode(byte);
+  return btoa(str).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+}
+
+function generateCodeVerifier(): string {
+  return base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
+}
+
+async function generateCodeChallenge(verifier: string): Promise<string> {
+  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+  return base64urlEncode(new Uint8Array(hash));
+}
+
 function computeStatus(sub: SubStatuses): OverallStatus {
   if (sub.autoMerge === null || sub.hasProtection === null) return "unknown";
   if (sub.autoMerge && sub.hasProtection) return "good";
   return "setup-needed";
+}
+
+function toSubStatuses(d: RepoGql): SubStatuses {
+  if (!d) return { autoMerge: null, hasProtection: null };
+  return {
+    autoMerge: d.autoMergeAllowed,
+    hasProtection:
+      d.branchProtectionRules.totalCount > 0 ||
+      d.rulesets.totalCount > 0,
+  };
+}
+
+function toRepoStatus(repo: RepoInfo): RepoStatus {
+  const subStatuses = toSubStatuses(repo.graphql);
+  return {
+    owner: repo.owner,
+    name: repo.name,
+    fullName: repo.fullName,
+    subStatuses,
+    status: computeStatus(subStatuses),
+  };
 }
 
 function statusEmoji(status: OverallStatus): string {
@@ -73,7 +111,10 @@ dashboard.use("/*", async (c, next) => {
 
 dashboard.get("/login", async (c) => {
   const state = crypto.randomUUID();
-  await c.env.SESSIONS_KV.put(`oauth_state:${state}`, "1", {
+  const codeVerifier = generateCodeVerifier();
+  const codeChallenge = await generateCodeChallenge(codeVerifier);
+
+  await c.env.SESSIONS_KV.put(`oauth_state:${state}`, JSON.stringify({ codeVerifier }), {
     expirationTtl: STATE_TTL,
   });
 
@@ -84,6 +125,8 @@ dashboard.get("/login", async (c) => {
   authUrl.searchParams.set("client_id", c.env.CLIENT_ID);
   authUrl.searchParams.set("state", state);
   authUrl.searchParams.set("redirect_uri", callbackUrl);
+  authUrl.searchParams.set("code_challenge", codeChallenge);
+  authUrl.searchParams.set("code_challenge_method", "S256");
 
   return c.redirect(authUrl.toString());
 });
@@ -98,17 +141,16 @@ dashboard.get("/callback", async (c) => {
   if (!storedState) return c.text("Invalid or expired OAuth state", 400);
   await c.env.SESSIONS_KV.delete(`oauth_state:${state}`);
 
-  const app = new App({
-    appId: c.env.APP_ID,
-    privateKey: c.env.PRIVATE_KEY,
-    oauth: { clientId: c.env.CLIENT_ID, clientSecret: c.env.CLIENT_SECRET },
-  });
-
-  const { authentication } = await app.oauth.createToken({ code });
-  const accessToken = authentication.token;
+  const { codeVerifier } = JSON.parse(storedState) as { codeVerifier: string };
+  const accessToken = await exchangeOAuthCode(
+    c.env.CLIENT_ID,
+    c.env.CLIENT_SECRET,
+    code,
+    codeVerifier,
+  );
 
   const sessionId = crypto.randomUUID();
-  const session: Session = { token: accessToken };
+  const session: Session = { accessToken };
   await c.env.SESSIONS_KV.put(
     `session:${sessionId}`,
     JSON.stringify(session),
@@ -129,145 +171,38 @@ dashboard.get("/callback", async (c) => {
 dashboard.get("/logout", async (c) => {
   const sessionId = getCookie(c, SESSION_COOKIE);
   if (sessionId) {
-    await c.env.SESSIONS_KV.delete(`session:${sessionId}`);
+    const stored = await c.env.SESSIONS_KV.get(`session:${sessionId}`);
+    if (stored) {
+      const { accessToken } = JSON.parse(stored) as Session;
+      await Promise.all([
+        c.env.SESSIONS_KV.delete(`session:${sessionId}`),
+        revokeOAuthToken(c.env.CLIENT_ID, c.env.CLIENT_SECRET, accessToken),
+      ]);
+    }
   }
   deleteCookie(c, SESSION_COOKIE, { path: "/dashboard" });
   return c.redirect("/");
 });
 
-type RepoGql = {
-  autoMergeAllowed: boolean;
-  branchProtectionRules: { totalCount: number };
-  rulesets: { totalCount: number };
-} | null;
-
-function buildBatchQuery(repositories: { owner: { login: string }; name: string }[]) {
-  const varDeclarations = repositories
-    .map((_, i) => `$owner${i}: String!, $name${i}: String!`)
-    .join(", ");
-
-  const body = repositories
-    .map(
-      (_, i) =>
-        `r${i}: repository(owner: $owner${i}, name: $name${i}) {
-          autoMergeAllowed
-          branchProtectionRules(first: 1) { totalCount }
-          rulesets(first: 1) { totalCount }
-        }`,
-    )
-    .join("\n");
-
-  const variables = Object.fromEntries(
-    repositories.flatMap((repo, i) => [
-      [`owner${i}`, repo.owner.login],
-      [`name${i}`, repo.name],
-    ]),
-  );
-
-  return { query: `query BatchRepos(${varDeclarations}) { ${body} }`, variables };
-}
-
-async function fetchRepoGraphqlData(
-  app: App,
-  installationId: number,
-  repositories: { owner: { login: string }; name: string }[],
-): Promise<Record<string, RepoGql>> {
-  const installOctokit = await app.getInstallationOctokit(installationId);
-  const { query, variables } = buildBatchQuery(repositories);
-  return installOctokit.graphql<Record<string, RepoGql>>(query, variables);
-}
-
-function toSubStatuses(d: RepoGql): SubStatuses {
-  if (!d) return { autoMerge: null, hasProtection: null };
-  return {
-    autoMerge: d.autoMergeAllowed,
-    hasProtection:
-      d.branchProtectionRules.totalCount > 0 ||
-      d.rulesets.totalCount > 0,
-  };
-}
-
-function toRepoStatuses(
-  repositories: { owner: { login: string }; name: string; full_name: string }[],
-  gqlResult: Record<string, RepoGql>,
-): RepoStatus[] {
-  return repositories.map((repo, i) => {
-    const sub = toSubStatuses(gqlResult[`r${i}`] ?? null);
-    return {
-      owner: repo.owner.login,
-      name: repo.name,
-      fullName: repo.full_name,
-      subStatuses: sub,
-      status: computeStatus(sub),
-    };
-  });
-}
-
-const UNKNOWN_STATUSES: SubStatuses = { autoMerge: null, hasProtection: null };
-
-async function fetchInstallationRepos(
-  app: App,
-  userOctokit: Octokit,
-  installation: { id: number },
-): Promise<RepoStatus[]> {
-  const {
-    data: { repositories },
-  } = await userOctokit.rest.apps.listInstallationReposForAuthenticatedUser({
-    installation_id: installation.id,
-  });
-
-  if (repositories.length === 0) return [];
-
-  const gqlResult = await fetchRepoGraphqlData(app, installation.id, repositories)
-    .catch(() => null);
-
-  if (!gqlResult) {
-    return repositories.map((repo) => ({
-      owner: repo.owner.login,
-      name: repo.name,
-      fullName: repo.full_name,
-      subStatuses: UNKNOWN_STATUSES,
-      status: computeStatus(UNKNOWN_STATUSES),
-    }));
-  }
-
-  return toRepoStatuses(repositories, gqlResult);
-}
-
-async function fetchAllRepos(
-  app: App,
-  userOctokit: Octokit,
-): Promise<RepoStatus[]> {
-  const {
-    data: { installations },
-  } = await userOctokit.rest.apps.listInstallationsForAuthenticatedUser();
-
-  const nested = await Promise.all(
-    installations.map((inst) => fetchInstallationRepos(app, userOctokit, inst)),
-  );
-
-  return nested.flat().sort((a, b) => a.fullName.localeCompare(b.fullName));
-}
-
 dashboard.get("/", async (c) => {
-  const { token } = c.get("session");
+  const { accessToken } = c.get("session");
 
   const app = new App({
     appId: c.env.APP_ID,
     privateKey: c.env.PRIVATE_KEY,
     oauth: { clientId: c.env.CLIENT_ID, clientSecret: c.env.CLIENT_SECRET },
   });
-  const userOctokit = await app.oauth.getUserOctokit({ token });
+  const userOctokit = await app.oauth.getUserOctokit({ token: accessToken });
 
-  const [{ data: user }, repos] = await Promise.all([
-    userOctokit.rest.users.getAuthenticated(),
+  const [login, repoInfos] = await Promise.all([
+    fetchAuthenticatedLogin(userOctokit),
     fetchAllRepos(app, userOctokit).catch((err) => {
       console.error("Failed to fetch installations:", err);
-      return [] as RepoStatus[];
+      return [] as RepoInfo[];
     }),
   ]);
 
-  return c.html(renderPage(user.login, repos));
+  return c.html(renderPage(login, repoInfos.map(toRepoStatus)));
 });
 
 function repoCard(repo: RepoStatus) {
