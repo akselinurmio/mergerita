@@ -350,7 +350,7 @@ function renderPage(login: string, repos: RepoStatus[]) {
             --muted: #555;
             --card-bg: rgba(255, 255, 255, 0.55);
             --card-border: rgba(0, 0, 0, 0.1);
-            --radius: 10px;
+            --radius: 0.5rem;
             --font: system-ui, sans-serif;
           }
 
@@ -397,7 +397,7 @@ function renderPage(login: string, repos: RepoStatus[]) {
           .logout-btn {
             background: var(--card-bg);
             border: 1.5px solid var(--card-border);
-            border-radius: 6px;
+            border-radius: var(--radius);
             color: var(--muted);
             cursor: pointer;
             font: inherit;

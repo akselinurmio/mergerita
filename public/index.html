@@ -5,34 +5,69 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Mergerita</title>
     <style>
+      :root {
+        --lime: #e8f48c;
+        --lime-deeper: #b8c840;
+        --text: #1a1a1a;
+        --muted: #555;
+        --card-bg: rgba(255, 255, 255, 0.55);
+        --card-border: rgba(0, 0, 0, 0.1);
+        --radius: 0.5rem;
+        --font: system-ui, sans-serif;
+      }
+
       body {
-        background: #e8f48c;
+        background: var(--lime);
         display: flex;
         flex-direction: column;
         justify-content: center;
         align-items: center;
         height: 100vh;
         margin: 0;
-        font-family: system-ui, sans-serif;
+        font-family: var(--font);
       }
       h1 {
         font-size: 3rem;
+        margin-block: 0.75rem;
+      }
+
+      .signin-btn {
+        display: inline-block;
+        background: var(--card-bg);
+        border: 1.5px solid var(--card-border);
+        border-radius: var(--radius);
+        color: var(--muted);
+        cursor: pointer;
+        font: inherit;
+        font-size: 1rem;
+        padding: 0.35rem 0.75rem;
+        text-decoration: none;
+      }
+      .signin-btn:hover {
+        color: var(--text);
+        border-color: var(--lime-deeper);
+        background: var(--card-bg);
+      }
+
+      nav {
+        margin-block-start: 2rem;
       }
       a {
-        color: inherit;
+        color: var(--muted);
         text-decoration: underline;
       }
       a:hover {
-        background: #f5f5dc;
+        color: var(--text);
       }
     </style>
   </head>
   <body>
     <h1>🍸 Mergerita</h1>
+    <a href="/dashboard" class="signin-btn">Sign in with GitHub</a>
     <nav>
-      <a href="https://github.com/akselinurmio/mergerita">GitHub</a>
-      &middot;
-      <a href="/dashboard">Dashboard</a>
+      <a href="https://github.com/akselinurmio/mergerita"
+        >Mergerita on GitHub ↗</a
+      >
     </nav>
   </body>
 </html>
