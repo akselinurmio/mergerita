@@ -533,6 +533,20 @@ function renderPage(login: string, repos: RepoStatus[], nonce: string) {
             color: var(--text);
           }
 
+          .install-link {
+            margin-top: 1rem;
+            font-size: 0.82rem;
+          }
+
+          .install-link a {
+            color: var(--muted);
+            text-decoration: underline;
+          }
+
+          .install-link a:hover {
+            color: var(--text);
+          }
+
           .empty-state {
             background: var(--card-bg);
             border: 1.5px solid var(--card-border);
@@ -584,7 +598,15 @@ function renderPage(login: string, repos: RepoStatus[], nonce: string) {
                   Install Mergerita on GitHub ↗
                 </a>
               </div>`
-            : html`<div class="repo-list">${repos.map(repoCard)}</div>`}
+            : html`<div class="repo-list">${repos.map(repoCard)}</div>
+                <p class="install-link">
+                  <a
+                    href="https://github.com/apps/mergerita/installations/new"
+                    target="_blank"
+                    rel="noopener"
+                    >Manage GitHub App installation ↗</a
+                  >
+                </p>`}
         </main>
       </body>
     </html>`;
