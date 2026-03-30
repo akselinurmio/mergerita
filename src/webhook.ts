@@ -1,5 +1,8 @@
 import type { Context } from "hono";
-import type { EmitterWebhookEvent, EmitterWebhookEventName } from "@octokit/webhooks";
+import type {
+  EmitterWebhookEvent,
+  EmitterWebhookEventName,
+} from "@octokit/webhooks";
 import { App } from "octokit";
 import { enableAutoMerge } from "./github";
 
@@ -30,15 +33,23 @@ export async function handleWebhook(c: Context<{ Bindings: Env }>) {
   }
 
   app.webhooks.on(
-    ["pull_request.opened", "pull_request.reopened", "pull_request.synchronize"],
+    [
+      "pull_request.opened",
+      "pull_request.reopened",
+      "pull_request.synchronize",
+    ],
     async ({ octokit, payload }) => {
       if (payload.pull_request.user?.login !== "dependabot[bot]") {
-        console.log(`Skipped: author is "${payload.pull_request.user?.login ?? "unknown"}", not dependabot[bot]`);
+        console.log(
+          `Skipped: author is "${payload.pull_request.user?.login ?? "unknown"}", not dependabot[bot]`,
+        );
         return;
       }
 
       const [owner, repo] = payload.repository.full_name.split("/");
-      console.log(`Processing Dependabot PR #${payload.pull_request.number} in ${owner}/${repo}`);
+      console.log(
+        `Processing Dependabot PR #${payload.pull_request.number} in ${owner}/${repo}`,
+      );
 
       await enableAutoMerge(octokit, payload.pull_request.node_id);
       console.log(`Auto-merge enabled for PR #${payload.pull_request.number}`);

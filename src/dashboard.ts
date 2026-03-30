@@ -5,7 +5,12 @@ import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { csrf } from "hono/csrf";
 import { secureHeaders } from "hono/secure-headers";
 import { App } from "octokit";
-import { exchangeOAuthCode, revokeOAuthToken, fetchAuthenticatedLogin, fetchAllRepos } from "./github";
+import {
+  exchangeOAuthCode,
+  revokeOAuthToken,
+  fetchAuthenticatedLogin,
+  fetchAllRepos,
+} from "./github";
 import type { RepoGql, RepoInfo } from "./github";
 
 interface Session {
@@ -29,7 +34,7 @@ interface RepoStatus {
 
 const SESSION_COOKIE = "sid";
 const SESSION_TTL = 28800; // 8 hours
-const STATE_TTL = 600;     // 10 minutes
+const STATE_TTL = 600; // 10 minutes
 
 function base64urlEncode(bytes: Uint8Array): string {
   let str = "";
@@ -42,7 +47,10 @@ function generateCodeVerifier(): string {
 }
 
 async function generateCodeChallenge(verifier: string): Promise<string> {
-  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+  const hash = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(verifier),
+  );
   return base64urlEncode(new Uint8Array(hash));
 }
 
@@ -57,8 +65,7 @@ function toSubStatuses(d: RepoGql): SubStatuses {
   return {
     autoMerge: d.autoMergeAllowed,
     hasProtection:
-      d.branchProtectionRules.totalCount > 0 ||
-      d.rulesets.totalCount > 0,
+      d.branchProtectionRules.totalCount > 0 || d.rulesets.totalCount > 0,
   };
 }
 
@@ -85,7 +92,11 @@ function statusLabel(status: OverallStatus): string {
   return "Unknown";
 }
 
-function subStatusIcon(value: boolean | null, trueLabel: string, falseLabel: string): string {
+function subStatusIcon(
+  value: boolean | null,
+  trueLabel: string,
+  falseLabel: string,
+): string {
   if (value === null) return "❓ Unknown";
   return value ? `✅ ${trueLabel}` : `❌ ${falseLabel}`;
 }
@@ -100,19 +111,25 @@ async function destroySession(c: Context<HonoEnv>): Promise<void> {
 
 const dashboard = new Hono<HonoEnv>();
 
-dashboard.use("/*", secureHeaders({
-  contentSecurityPolicy: {
-    defaultSrc: ["'none'"],
-    styleSrc: ["'unsafe-inline'"],
-    frameAncestors: ["'none'"],
-  },
-  xFrameOptions: "DENY",
-}));
+dashboard.use(
+  "/*",
+  secureHeaders({
+    contentSecurityPolicy: {
+      defaultSrc: ["'none'"],
+      styleSrc: ["'unsafe-inline'"],
+      frameAncestors: ["'none'"],
+    },
+    xFrameOptions: "DENY",
+  }),
+);
 
 dashboard.use("/*", csrf());
 
 dashboard.use("/*", async (c, next) => {
-  if (c.req.path === "/dashboard/login" || c.req.path === "/dashboard/callback") {
+  if (
+    c.req.path === "/dashboard/login" ||
+    c.req.path === "/dashboard/callback"
+  ) {
     return next();
   }
 
@@ -134,9 +151,13 @@ dashboard.get("/login", async (c) => {
   const codeVerifier = generateCodeVerifier();
   const codeChallenge = await generateCodeChallenge(codeVerifier);
 
-  await c.env.SESSIONS_KV.put(`oauth_state:${state}`, JSON.stringify({ codeVerifier }), {
-    expirationTtl: STATE_TTL,
-  });
+  await c.env.SESSIONS_KV.put(
+    `oauth_state:${state}`,
+    JSON.stringify({ codeVerifier }),
+    {
+      expirationTtl: STATE_TTL,
+    },
+  );
 
   const reqUrl = new URL(c.req.url);
   const callbackUrl = `${reqUrl.protocol}//${reqUrl.host}/dashboard/callback`;
@@ -172,16 +193,17 @@ dashboard.get("/callback", async (c) => {
       codeVerifier,
     );
   } catch {
-    return c.text("Login failed — the authorization code was invalid or expired. Please try again.", 400);
+    return c.text(
+      "Login failed — the authorization code was invalid or expired. Please try again.",
+      400,
+    );
   }
 
   const sessionId = crypto.randomUUID();
   const session: Session = { accessToken };
-  await c.env.SESSIONS_KV.put(
-    `session:${sessionId}`,
-    JSON.stringify(session),
-    { expirationTtl: SESSION_TTL },
-  );
+  await c.env.SESSIONS_KV.put(`session:${sessionId}`, JSON.stringify(session), {
+    expirationTtl: SESSION_TTL,
+  });
 
   setCookie(c, SESSION_COOKIE, sessionId, {
     httpOnly: true,
@@ -200,7 +222,11 @@ dashboard.post("/logout", async (c) => {
     const stored = await c.env.SESSIONS_KV.get(`session:${sessionId}`);
     if (stored) {
       const { accessToken } = JSON.parse(stored) as Session;
-      await revokeOAuthToken(c.env.CLIENT_ID, c.env.CLIENT_SECRET, accessToken).catch(() => {});
+      await revokeOAuthToken(
+        c.env.CLIENT_ID,
+        c.env.CLIENT_SECRET,
+        accessToken,
+      ).catch(() => {});
     }
   }
   await destroySession(c);
@@ -226,7 +252,10 @@ dashboard.get("/", async (c) => {
       await destroySession(c);
       return c.redirect("/dashboard/login");
     }
-    return c.text("Something went wrong while loading your profile. Please try again later.", 500);
+    return c.text(
+      "Something went wrong while loading your profile. Please try again later.",
+      500,
+    );
   }
 
   const repoInfos = await fetchAllRepos(app, userOctokit).catch((err) => {
@@ -240,32 +269,58 @@ dashboard.get("/", async (c) => {
 function repoCard(repo: RepoStatus) {
   const emoji = statusEmoji(repo.status);
   const label = statusLabel(repo.status);
-  return html`
-    <details class="repo-card status-${repo.status}">
-      <summary>
-        <span class="repo-name">${repo.fullName}</span>
-        <span class="status-badge" title="${label}">${emoji} ${label}</span>
-      </summary>
-      <div class="repo-detail">
-        <table>
-          <tbody>
-            <tr>
-              <td class="sub-label">Auto-merge</td>
-              <td>${subStatusIcon(repo.subStatuses.autoMerge, "Enabled", "Disabled")}</td>
-            </tr>
-            <tr>
-              <td class="sub-label">Branch protection / rulesets</td>
-              <td>${subStatusIcon(repo.subStatuses.hasProtection, "Configured", "Not configured")}</td>
-            </tr>
-          </tbody>
-        </table>
-        <div class="repo-links">
-          <a href="https://github.com/${repo.fullName}" target="_blank" rel="noopener">View repo ↗</a>
-          <a href="https://github.com/${repo.fullName}/settings" target="_blank" rel="noopener">Repo settings ↗</a>
-          <a href="https://github.com/${repo.fullName}/settings/branches" target="_blank" rel="noopener">Branch protection ↗</a>
-        </div>
+  return html`<details class="repo-card status-${repo.status}">
+    <summary>
+      <span class="repo-name">${repo.fullName}</span>
+      <span class="status-badge" title="${label}">${emoji} ${label}</span>
+    </summary>
+    <div class="repo-detail">
+      <table>
+        <tbody>
+          <tr>
+            <td class="sub-label">Auto-merge</td>
+            <td>
+              ${subStatusIcon(
+                repo.subStatuses.autoMerge,
+                "Enabled",
+                "Disabled",
+              )}
+            </td>
+          </tr>
+          <tr>
+            <td class="sub-label">Branch protection / rulesets</td>
+            <td>
+              ${subStatusIcon(
+                repo.subStatuses.hasProtection,
+                "Configured",
+                "Not configured",
+              )}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="repo-links">
+        <a
+          href="https://github.com/${repo.fullName}"
+          target="_blank"
+          rel="noopener"
+          >View repo ↗</a
+        >
+        <a
+          href="https://github.com/${repo.fullName}/settings"
+          target="_blank"
+          rel="noopener"
+          >Repo settings ↗</a
+        >
+        <a
+          href="https://github.com/${repo.fullName}/settings/branches"
+          target="_blank"
+          rel="noopener"
+          >Branch protection ↗</a
+        >
       </div>
-    </details>`;
+    </div>
+  </details>`;
 }
 
 function renderPage(login: string, repos: RepoStatus[]) {
@@ -273,214 +328,270 @@ function renderPage(login: string, repos: RepoStatus[]) {
   const total = repos.length;
 
   return html`<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Dashboard · Mergerita</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Dashboard · Mergerita</title>
+        <style>
+          *,
+          *::before,
+          *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+          }
 
-    :root {
-      --lime: #e8f48c;
-      --lime-dark: #d4e070;
-      --lime-deeper: #b8c840;
-      --text: #1a1a1a;
-      --muted: #555;
-      --card-bg: rgba(255,255,255,0.55);
-      --card-border: rgba(0,0,0,0.1);
-      --radius: 10px;
-      --font: system-ui, -apple-system, sans-serif;
-    }
+          :root {
+            --lime: #e8f48c;
+            --lime-dark: #d4e070;
+            --lime-deeper: #b8c840;
+            --text: #1a1a1a;
+            --muted: #555;
+            --card-bg: rgba(255, 255, 255, 0.55);
+            --card-border: rgba(0, 0, 0, 0.1);
+            --radius: 10px;
+            --font: system-ui, -apple-system, sans-serif;
+          }
 
-    body {
-      background: var(--lime);
-      background-image: radial-gradient(ellipse at 70% 20%, #f5ffb0 0%, var(--lime) 60%);
-      min-height: 100vh;
-      font-family: var(--font);
-      color: var(--text);
-      padding: 0 1rem 4rem;
-    }
+          body {
+            background: var(--lime);
+            background-image: radial-gradient(
+              ellipse at 70% 20%,
+              #f5ffb0 0%,
+              var(--lime) 60%
+            );
+            min-height: 100vh;
+            font-family: var(--font);
+            color: var(--text);
+            padding: 0 1rem 4rem;
+          }
 
-    header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 1.25rem 0;
-      border-bottom: 1.5px solid var(--lime-deeper);
-      margin-bottom: 2rem;
-      max-width: 760px;
-      margin-left: auto;
-      margin-right: auto;
-    }
+          header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 1.25rem 0;
+            border-bottom: 1.5px solid var(--lime-deeper);
+            margin-bottom: 2rem;
+            max-width: 760px;
+            margin-left: auto;
+            margin-right: auto;
+          }
 
-    .logo { font-size: 1.35rem; font-weight: 700; text-decoration: none; color: inherit; }
+          .logo {
+            font-size: 1.35rem;
+            font-weight: 700;
+            text-decoration: none;
+            color: inherit;
+          }
 
-    .header-right {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      font-size: 0.9rem;
-      color: var(--muted);
-    }
+          .header-right {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            font-size: 0.9rem;
+            color: var(--muted);
+          }
 
-    .header-right a { color: inherit; text-decoration: underline; }
-    .header-right a:hover { color: var(--text); }
+          .header-right a {
+            color: inherit;
+            text-decoration: underline;
+          }
+          .header-right a:hover {
+            color: var(--text);
+          }
 
-    .logout-btn {
-      background: var(--card-bg);
-      border: 1.5px solid var(--card-border);
-      border-radius: 6px;
-      color: var(--muted);
-      cursor: pointer;
-      font: inherit;
-      font-size: 0.82rem;
-      padding: 0.35rem 0.75rem;
-    }
-    .logout-btn:hover { color: var(--text); border-color: var(--lime-deeper); }
+          .logout-btn {
+            background: var(--card-bg);
+            border: 1.5px solid var(--card-border);
+            border-radius: 6px;
+            color: var(--muted);
+            cursor: pointer;
+            font: inherit;
+            font-size: 0.82rem;
+            padding: 0.35rem 0.75rem;
+          }
+          .logout-btn:hover {
+            color: var(--text);
+            border-color: var(--lime-deeper);
+          }
 
-    main { max-width: 760px; margin: 0 auto; }
+          main {
+            max-width: 760px;
+            margin: 0 auto;
+          }
 
-    .page-title {
-      font-size: 1.6rem;
-      font-weight: 700;
-      margin-bottom: 0.35rem;
-    }
+          .page-title {
+            font-size: 1.6rem;
+            font-weight: 700;
+            margin-bottom: 0.35rem;
+          }
 
-    .page-subtitle {
-      font-size: 0.9rem;
-      color: var(--muted);
-      margin-bottom: 1.75rem;
-    }
+          .page-subtitle {
+            font-size: 0.9rem;
+            color: var(--muted);
+            margin-bottom: 1.75rem;
+          }
 
-    .repo-list { display: flex; flex-direction: column; gap: 0.5rem; }
+          .repo-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+          }
 
-    details.repo-card {
-      background: var(--card-bg);
-      border: 1.5px solid var(--card-border);
-      border-radius: var(--radius);
-      backdrop-filter: blur(4px);
-      overflow: hidden;
-      transition: border-color 0.15s;
-    }
+          details.repo-card {
+            background: var(--card-bg);
+            border: 1.5px solid var(--card-border);
+            border-radius: var(--radius);
+            backdrop-filter: blur(4px);
+            overflow: hidden;
+          }
 
-    details.repo-card[open] { border-color: var(--lime-deeper); }
+          details.repo-card[open] {
+            border-color: var(--lime-deeper);
+          }
 
-    details.repo-card > summary {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0.85rem 1.1rem;
-      cursor: pointer;
-      list-style: none;
-      gap: 1rem;
-      user-select: none;
-    }
+          details.repo-card > summary {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.85rem 1.1rem;
+            cursor: pointer;
+            list-style: none;
+            gap: 1rem;
+            user-select: none;
+          }
 
-    details.repo-card > summary::-webkit-details-marker { display: none; }
+          details.repo-card > summary::-webkit-details-marker {
+            display: none;
+          }
 
-    details.repo-card > summary::before {
-      content: '›';
-      font-size: 1.2rem;
-      color: var(--muted);
-      margin-right: 0.5rem;
-      transition: transform 0.15s;
-      display: inline-block;
-      flex-shrink: 0;
-    }
+          details.repo-card > summary::before {
+            content: "›";
+            font-size: 1.2rem;
+            color: var(--muted);
+            margin-right: 0.5rem;
 
-    details.repo-card[open] > summary::before { transform: rotate(90deg); }
+            display: inline-block;
+            flex-shrink: 0;
+          }
 
-    .repo-name {
-      font-weight: 600;
-      font-size: 0.95rem;
-      flex: 1;
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
+          details.repo-card[open] > summary::before {
+            transform: rotate(90deg);
+          }
 
-    .status-badge {
-      font-size: 0.82rem;
-      white-space: nowrap;
-      flex-shrink: 0;
-    }
+          .repo-name {
+            font-weight: 600;
+            font-size: 0.95rem;
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
 
-    .repo-detail {
-      padding: 0 1.1rem 1.1rem;
-      border-top: 1px solid var(--card-border);
-    }
+          .status-badge {
+            font-size: 0.82rem;
+            white-space: nowrap;
+            flex-shrink: 0;
+          }
 
-    .repo-detail table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 0.75rem 0 1rem;
-      font-size: 0.88rem;
-    }
+          .repo-detail {
+            padding: 0 1.1rem 1.1rem;
+            border-top: 1px solid var(--card-border);
+          }
 
-    .repo-detail td { padding: 0.35rem 0; }
-    .repo-detail td.sub-label { color: var(--muted); width: 55%; }
+          .repo-detail table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 0.75rem 0 1rem;
+            font-size: 0.88rem;
+          }
 
-    .repo-links {
-      display: flex;
-      gap: 1rem;
-      flex-wrap: wrap;
-      font-size: 0.82rem;
-    }
+          .repo-detail td {
+            padding: 0.35rem 0;
+          }
+          .repo-detail td.sub-label {
+            color: var(--muted);
+            width: 55%;
+          }
 
-    .repo-links a {
-      color: var(--muted);
-      text-decoration: underline;
-    }
+          .repo-links {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+            font-size: 0.82rem;
+          }
 
-    .repo-links a:hover { color: var(--text); }
+          .repo-links a {
+            color: var(--muted);
+            text-decoration: underline;
+          }
 
-    .empty-state {
-      background: var(--card-bg);
-      border: 1.5px solid var(--card-border);
-      border-radius: var(--radius);
-      padding: 2.5rem 2rem;
-      text-align: center;
-    }
+          .repo-links a:hover {
+            color: var(--text);
+          }
 
-    .empty-state p { color: var(--muted); margin-bottom: 1rem; font-size: 0.95rem; }
-    .empty-state a { color: var(--text); font-weight: 600; }
-  </style>
-</head>
-<body>
-  <header>
-    <a class="logo" href="/">🍸 Mergerita</a>
-    <div class="header-right">
-      <span>@${login}</span>
-      <form method="POST" action="/dashboard/logout" style="display:inline">
-        <button type="submit" class="logout-btn">Log out</button>
-      </form>
-    </div>
-  </header>
+          .empty-state {
+            background: var(--card-bg);
+            border: 1.5px solid var(--card-border);
+            border-radius: var(--radius);
+            padding: 2.5rem 2rem;
+            text-align: center;
+          }
 
-  <main>
-    <h1 class="page-title">Your repositories</h1>
-    <p class="page-subtitle">
-      ${total === 0
-        ? "No repositories installed yet."
-        : total === goodCount
-          ? `All ${total} ${total === 1 ? "repository is" : "repositories are"} good to go.`
-          : `${goodCount} of ${total} ${total === 1 ? "repository" : "repositories"} good to go.`}
-    </p>
+          .empty-state p {
+            color: var(--muted);
+            margin-bottom: 1rem;
+            font-size: 0.95rem;
+          }
+          .empty-state a {
+            color: var(--text);
+            font-weight: 600;
+          }
+        </style>
+      </head>
+      <body>
+        <header>
+          <a class="logo" href="/">🍸 Mergerita</a>
+          <div class="header-right">
+            <span>@${login}</span>
+            <form
+              method="POST"
+              action="/dashboard/logout"
+              style="display:inline"
+            >
+              <button type="submit" class="logout-btn">Log out</button>
+            </form>
+          </div>
+        </header>
 
-    ${total === 0
-      ? html`
-        <div class="empty-state">
-          <p>Mergerita isn't installed on any repositories yet.</p>
-          <a href="https://github.com/apps/mergerita/installations/new" target="_blank" rel="noopener">
-            Install Mergerita on GitHub ↗
-          </a>
-        </div>`
-      : html`<div class="repo-list">${repos.map(repoCard)}</div>`}
-  </main>
-</body>
-</html>`;
+        <main>
+          <h1 class="page-title">Your repositories</h1>
+          <p class="page-subtitle">
+            ${total === 0
+              ? "No repositories installed yet."
+              : total === goodCount
+                ? `All ${total} ${total === 1 ? "repository is" : "repositories are"} good to go.`
+                : `${goodCount} of ${total} ${total === 1 ? "repository" : "repositories"} good to go.`}
+          </p>
+
+          ${total === 0
+            ? html`<div class="empty-state">
+                <p>Mergerita isn't installed on any repositories yet.</p>
+                <a
+                  href="https://github.com/apps/mergerita/installations/new"
+                  target="_blank"
+                  rel="noopener"
+                >
+                  Install Mergerita on GitHub ↗
+                </a>
+              </div>`
+            : html`<div class="repo-list">${repos.map(repoCard)}</div>`}
+        </main>
+      </body>
+    </html>`;
 }
 
 export default dashboard;

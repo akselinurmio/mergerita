@@ -39,7 +39,8 @@ export async function exchangeOAuthCode(
   });
   if (!resp.ok) throw new Error("Token exchange failed");
   const data = (await resp.json()) as { access_token?: string; error?: string };
-  if (!data.access_token) throw new Error(data.error ?? "Token exchange failed");
+  if (!data.access_token)
+    throw new Error(data.error ?? "Token exchange failed");
   return data.access_token;
 }
 
@@ -90,16 +91,18 @@ async function fetchRepoGql(
   owner: string,
   name: string,
 ): Promise<RepoGql> {
-  const data = await octokit.graphql<{ repository: RepoGql }>(
-    `query RepoStatus($owner: String!, $name: String!) {
+  const data = await octokit
+    .graphql<{ repository: RepoGql }>(
+      `query RepoStatus($owner: String!, $name: String!) {
       repository(owner: $owner, name: $name) {
         autoMergeAllowed
         branchProtectionRules(first: 1) { totalCount }
         rulesets(first: 1) { totalCount }
       }
     }`,
-    { owner, name },
-  ).catch(() => null);
+      { owner, name },
+    )
+    .catch(() => null);
   return data?.repository ?? null;
 }
 
@@ -108,7 +111,9 @@ interface Installation {
   repositories: { owner: { login: string }; name: string; full_name: string }[];
 }
 
-async function fetchUserInstallations(userOctokit: Octokit): Promise<Installation[]> {
+async function fetchUserInstallations(
+  userOctokit: Octokit,
+): Promise<Installation[]> {
   const installations: Installation[] = [];
   for await (const { data: installs } of userOctokit.paginate.iterator(
     userOctokit.rest.apps.listInstallationsForAuthenticatedUser,
@@ -120,7 +125,11 @@ async function fetchUserInstallations(userOctokit: Octokit): Promise<Installatio
         { installation_id: install.id },
       )) {
         for (const r of repoPage) {
-          repos.push({ owner: { login: r.owner.login }, name: r.name, full_name: r.full_name });
+          repos.push({
+            owner: { login: r.owner.login },
+            name: r.name,
+            full_name: r.full_name,
+          });
         }
       }
       installations.push({ id: install.id, repositories: repos });
@@ -129,7 +138,10 @@ async function fetchUserInstallations(userOctokit: Octokit): Promise<Installatio
   return installations;
 }
 
-export async function fetchAllRepos(app: App, userOctokit: Octokit): Promise<RepoInfo[]> {
+export async function fetchAllRepos(
+  app: App,
+  userOctokit: Octokit,
+): Promise<RepoInfo[]> {
   const installations = await fetchUserInstallations(userOctokit);
 
   const pending: Promise<RepoInfo>[] = [];
@@ -150,6 +162,6 @@ export async function fetchAllRepos(app: App, userOctokit: Octokit): Promise<Rep
   }
 
   const repos = await Promise.all(pending);
-  const collator = new Intl.Collator('und', { usage: 'sort' });
+  const collator = new Intl.Collator("und", { usage: "sort" });
   return repos.sort((a, b) => collator.compare(a.fullName, b.fullName));
 }

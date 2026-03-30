@@ -46,22 +46,22 @@ wrangler deploy
 
 Go to **[github.com/settings/apps/new](https://github.com/settings/apps/new)** and fill in:
 
-| Field | Value |
-|---|---|
-| **GitHub App name** | `mergerita` (or any unique name) |
-| **Homepage URL** | Your Worker URL |
-| **Callback URL** | `https://mergerita.<you>.workers.dev/dashboard/callback` |
-| **Webhook URL** | `https://mergerita.<you>.workers.dev/webhook` |
-| **Webhook secret** | Generate one: `openssl rand -hex 32` |
+| Field               | Value                                                    |
+| ------------------- | -------------------------------------------------------- |
+| **GitHub App name** | `mergerita` (or any unique name)                         |
+| **Homepage URL**    | Your Worker URL                                          |
+| **Callback URL**    | `https://mergerita.<you>.workers.dev/dashboard/callback` |
+| **Webhook URL**     | `https://mergerita.<you>.workers.dev/webhook`            |
+| **Webhook secret**  | Generate one: `openssl rand -hex 32`                     |
 
 **Permissions** (Repository):
 
-| Permission | Access |
-|---|---|
-| Administration | Read-only |
-| Contents | Read & write |
-| Metadata | Read-only |
-| Pull requests | Read & write |
+| Permission     | Access       |
+| -------------- | ------------ |
+| Administration | Read-only    |
+| Contents       | Read & write |
+| Metadata       | Read-only    |
+| Pull requests  | Read & write |
 
 **Subscribe to events:**
 
@@ -131,11 +131,11 @@ Visit `https://mergerita.<you>.workers.dev/dashboard` to log in with GitHub and 
 
 Each repository shows one of three statuses:
 
-| Status | Meaning |
-|---|---|
-| ✅ Good to go | Auto-merge is enabled and at least one branch protection rule or ruleset is configured |
-| ⚠️ Setup needed | One or more settings are missing |
-| ❓ Unknown | Status could not be retrieved (API error or insufficient permissions) |
+| Status          | Meaning                                                                                |
+| --------------- | -------------------------------------------------------------------------------------- |
+| ✅ Good to go   | Auto-merge is enabled and at least one branch protection rule or ruleset is configured |
+| ⚠️ Setup needed | One or more settings are missing                                                       |
+| ❓ Unknown      | Status could not be retrieved (API error or insufficient permissions)                  |
 
 Click any repository row to expand it and see sub-status details, plus links to the repo and its settings pages on GitHub.
 
