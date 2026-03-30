@@ -371,7 +371,7 @@ function renderPage(login: string, repos: RepoStatus[], nonce: string) {
               #f5ffb0 0%,
               var(--lime) 60%
             );
-            min-height: 100vh;
+            min-height: 100svh;
             font-family: var(--font);
             color: var(--text);
             padding: 0 1rem 4rem;
