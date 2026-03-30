@@ -1,6 +1,9 @@
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { html } from "hono/html";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
+import { csrf } from "hono/csrf";
+import { secureHeaders } from "hono/secure-headers";
 import { App } from "octokit";
 import { exchangeOAuthCode, revokeOAuthToken, fetchAuthenticatedLogin, fetchAllRepos } from "./github";
 import type { RepoGql, RepoInfo } from "./github";
@@ -89,7 +92,24 @@ function subStatusIcon(value: boolean | null, trueLabel: string, falseLabel: str
 
 type HonoEnv = { Bindings: Env; Variables: { session: Session } };
 
+async function destroySession(c: Context<HonoEnv>): Promise<void> {
+  const sessionId = getCookie(c, SESSION_COOKIE);
+  if (sessionId) await c.env.SESSIONS_KV.delete(`session:${sessionId}`);
+  deleteCookie(c, SESSION_COOKIE, { path: "/dashboard" });
+}
+
 const dashboard = new Hono<HonoEnv>();
+
+dashboard.use("/*", secureHeaders({
+  contentSecurityPolicy: {
+    defaultSrc: ["'none'"],
+    styleSrc: ["'unsafe-inline'"],
+    frameAncestors: ["'none'"],
+  },
+  xFrameOptions: "DENY",
+}));
+
+dashboard.use("/*", csrf());
 
 dashboard.use("/*", async (c, next) => {
   if (c.req.path === "/dashboard/login" || c.req.path === "/dashboard/callback") {
@@ -101,7 +121,7 @@ dashboard.use("/*", async (c, next) => {
 
   const stored = await c.env.SESSIONS_KV.get(`session:${sessionId}`);
   if (!stored) {
-    deleteCookie(c, SESSION_COOKIE, { path: "/dashboard" });
+    await destroySession(c);
     return c.redirect("/dashboard/login");
   }
 
@@ -142,12 +162,18 @@ dashboard.get("/callback", async (c) => {
   await c.env.SESSIONS_KV.delete(`oauth_state:${state}`);
 
   const { codeVerifier } = JSON.parse(storedState) as { codeVerifier: string };
-  const accessToken = await exchangeOAuthCode(
-    c.env.CLIENT_ID,
-    c.env.CLIENT_SECRET,
-    code,
-    codeVerifier,
-  );
+
+  let accessToken: string;
+  try {
+    accessToken = await exchangeOAuthCode(
+      c.env.CLIENT_ID,
+      c.env.CLIENT_SECRET,
+      code,
+      codeVerifier,
+    );
+  } catch {
+    return c.text("Login failed — the authorization code was invalid or expired. Please try again.", 400);
+  }
 
   const sessionId = crypto.randomUUID();
   const session: Session = { accessToken };
@@ -168,19 +194,16 @@ dashboard.get("/callback", async (c) => {
   return c.redirect("/dashboard");
 });
 
-dashboard.get("/logout", async (c) => {
+dashboard.post("/logout", async (c) => {
   const sessionId = getCookie(c, SESSION_COOKIE);
   if (sessionId) {
     const stored = await c.env.SESSIONS_KV.get(`session:${sessionId}`);
     if (stored) {
       const { accessToken } = JSON.parse(stored) as Session;
-      await Promise.all([
-        c.env.SESSIONS_KV.delete(`session:${sessionId}`),
-        revokeOAuthToken(c.env.CLIENT_ID, c.env.CLIENT_SECRET, accessToken),
-      ]);
+      await revokeOAuthToken(c.env.CLIENT_ID, c.env.CLIENT_SECRET, accessToken).catch(() => {});
     }
   }
-  deleteCookie(c, SESSION_COOKIE, { path: "/dashboard" });
+  await destroySession(c);
   return c.redirect("/");
 });
 
@@ -194,13 +217,22 @@ dashboard.get("/", async (c) => {
   });
   const userOctokit = await app.oauth.getUserOctokit({ token: accessToken });
 
-  const [login, repoInfos] = await Promise.all([
-    fetchAuthenticatedLogin(userOctokit),
-    fetchAllRepos(app, userOctokit).catch((err) => {
-      console.error("Failed to fetch installations:", err);
-      return [] as RepoInfo[];
-    }),
-  ]);
+  let login: string;
+  try {
+    login = await fetchAuthenticatedLogin(userOctokit);
+  } catch (err: unknown) {
+    const status = (err as { status?: number }).status;
+    if (status === 401) {
+      await destroySession(c);
+      return c.redirect("/dashboard/login");
+    }
+    return c.text("Something went wrong while loading your profile. Please try again later.", 500);
+  }
+
+  const repoInfos = await fetchAllRepos(app, userOctokit).catch((err) => {
+    console.error("Failed to fetch installations:", err);
+    return [] as RepoInfo[];
+  });
 
   return c.html(renderPage(login, repoInfos.map(toRepoStatus)));
 });
@@ -294,6 +326,18 @@ function renderPage(login: string, repos: RepoStatus[]) {
 
     .header-right a { color: inherit; text-decoration: underline; }
     .header-right a:hover { color: var(--text); }
+
+    .logout-btn {
+      background: var(--card-bg);
+      border: 1.5px solid var(--card-border);
+      border-radius: 6px;
+      color: var(--muted);
+      cursor: pointer;
+      font: inherit;
+      font-size: 0.82rem;
+      padding: 0.35rem 0.75rem;
+    }
+    .logout-btn:hover { color: var(--text); border-color: var(--lime-deeper); }
 
     main { max-width: 760px; margin: 0 auto; }
 
@@ -409,7 +453,9 @@ function renderPage(login: string, repos: RepoStatus[]) {
     <a class="logo" href="/">🍸 Mergerita</a>
     <div class="header-right">
       <span>@${login}</span>
-      <a href="/dashboard/logout">Log out</a>
+      <form method="POST" action="/dashboard/logout" style="display:inline">
+        <button type="submit" class="logout-btn">Log out</button>
+      </form>
     </div>
   </header>
 

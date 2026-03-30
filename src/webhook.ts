@@ -1,4 +1,5 @@
 import type { Context } from "hono";
+import type { EmitterWebhookEvent, EmitterWebhookEventName } from "@octokit/webhooks";
 import { App } from "octokit";
 import { enableAutoMerge } from "./github";
 
@@ -46,7 +47,11 @@ export async function handleWebhook(c: Context<{ Bindings: Env }>) {
 
   c.executionCtx.waitUntil(
     app.webhooks
-      .verifyAndReceive({ id: deliveryId ?? "", name: event ?? "", payload: body, signature })
+      .receive({
+        id: deliveryId ?? "",
+        name: event as EmitterWebhookEventName,
+        payload: JSON.parse(body),
+      } as EmitterWebhookEvent)
       .catch((error: unknown) => console.error("Handler error:", error)),
   );
 
