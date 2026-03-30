@@ -351,7 +351,7 @@ function renderPage(login: string, repos: RepoStatus[]) {
             --card-bg: rgba(255, 255, 255, 0.55);
             --card-border: rgba(0, 0, 0, 0.1);
             --radius: 10px;
-            --font: system-ui, -apple-system, sans-serif;
+            --font: system-ui, sans-serif;
           }
 
           body {
@@ -392,14 +392,6 @@ function renderPage(login: string, repos: RepoStatus[]) {
             gap: 1rem;
             font-size: 0.9rem;
             color: var(--muted);
-          }
-
-          .header-right a {
-            color: inherit;
-            text-decoration: underline;
-          }
-          .header-right a:hover {
-            color: var(--text);
           }
 
           .logout-btn {
@@ -445,7 +437,6 @@ function renderPage(login: string, repos: RepoStatus[]) {
             border: 1.5px solid var(--card-border);
             border-radius: var(--radius);
             backdrop-filter: blur(4px);
-            overflow: hidden;
           }
 
           details.repo-card[open] {
@@ -472,7 +463,6 @@ function renderPage(login: string, repos: RepoStatus[]) {
             font-size: 1.2rem;
             color: var(--muted);
             margin-right: 0.5rem;
-
             display: inline-block;
             flex-shrink: 0;
           }
@@ -556,12 +546,8 @@ function renderPage(login: string, repos: RepoStatus[]) {
         <header>
           <a class="logo" href="/">🍸 Mergerita</a>
           <div class="header-right">
-            <span>@${login}</span>
-            <form
-              method="POST"
-              action="/dashboard/logout"
-              style="display:inline"
-            >
+            <span>${login}</span>
+            <form method="POST" action="/dashboard/logout">
               <button type="submit" class="logout-btn">Log out</button>
             </form>
           </div>
