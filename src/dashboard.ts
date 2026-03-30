@@ -3,7 +3,8 @@ import type { Context } from "hono";
 import { html } from "hono/html";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { csrf } from "hono/csrf";
-import { secureHeaders } from "hono/secure-headers";
+import { secureHeaders, NONCE } from "hono/secure-headers";
+import type { SecureHeadersVariables } from "hono/secure-headers";
 import { App } from "octokit";
 import {
   exchangeOAuthCode,
@@ -101,7 +102,10 @@ function subStatusIcon(
   return value ? `✅ ${trueLabel}` : `❌ ${falseLabel}`;
 }
 
-type HonoEnv = { Bindings: Env; Variables: { session: Session } };
+type HonoEnv = {
+  Bindings: Env;
+  Variables: SecureHeadersVariables & { session: Session };
+};
 
 async function destroySession(c: Context<HonoEnv>): Promise<void> {
   const sessionId = getCookie(c, SESSION_COOKIE);
@@ -116,7 +120,7 @@ dashboard.use(
   secureHeaders({
     contentSecurityPolicy: {
       defaultSrc: ["'none'"],
-      styleSrc: ["'unsafe-inline'"],
+      styleSrc: [NONCE],
       frameAncestors: ["'none'"],
     },
     xFrameOptions: "DENY",
@@ -263,7 +267,13 @@ dashboard.get("/", async (c) => {
     return [] as RepoInfo[];
   });
 
-  return c.html(renderPage(login, repoInfos.map(toRepoStatus)));
+  return c.html(
+    renderPage(
+      login,
+      repoInfos.map(toRepoStatus),
+      c.get("secureHeadersNonce") ?? "",
+    ),
+  );
 });
 
 function repoCard(repo: RepoStatus) {
@@ -323,7 +333,7 @@ function repoCard(repo: RepoStatus) {
   </details>`;
 }
 
-function renderPage(login: string, repos: RepoStatus[]) {
+function renderPage(login: string, repos: RepoStatus[], nonce: string) {
   const goodCount = repos.filter((r) => r.status === "good").length;
   const total = repos.length;
 
@@ -333,7 +343,7 @@ function renderPage(login: string, repos: RepoStatus[]) {
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Dashboard · Mergerita</title>
-        <style>
+        <style nonce="${nonce}">
           *,
           *::before,
           *::after {
