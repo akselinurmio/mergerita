@@ -55,8 +55,7 @@ type HonoEnv = { Bindings: Env; Variables: { session: Session } };
 const dashboard = new Hono<HonoEnv>();
 
 dashboard.use("/*", async (c, next) => {
-  const path = c.req.path;
-  if (path === "/login" || path === "/callback") {
+  if (c.req.path === "/dashboard/login" || c.req.path === "/dashboard/callback") {
     return next();
   }
 
