@@ -1,11 +1,10 @@
 import { Hono } from "hono";
 import { html } from "hono/html";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
-import { App } from "octokit";
+import { App, Octokit } from "octokit";
 
 interface Session {
   token: string;
-  login: string;
 }
 
 interface SubStatuses {
@@ -73,7 +72,7 @@ dashboard.use("/*", async (c, next) => {
 });
 
 dashboard.get("/login", async (c) => {
-  const state = crypto.randomUUID().replace(/-/g, "");
+  const state = crypto.randomUUID();
   await c.env.SESSIONS_KV.put(`oauth_state:${state}`, "1", {
     expirationTtl: STATE_TTL,
   });
@@ -108,12 +107,8 @@ dashboard.get("/callback", async (c) => {
   const { authentication } = await app.oauth.createToken({ code });
   const accessToken = authentication.token;
 
-  const userOctokit = await app.oauth.getUserOctokit({ token: accessToken });
-  const { data: user } =
-    await userOctokit.rest.users.getAuthenticated();
-
-  const sessionId = crypto.randomUUID().replace(/-/g, "");
-  const session: Session = { token: accessToken, login: user.login };
+  const sessionId = crypto.randomUUID();
+  const session: Session = { token: accessToken };
   await c.env.SESSIONS_KV.put(
     `session:${sessionId}`,
     JSON.stringify(session),
@@ -140,8 +135,122 @@ dashboard.get("/logout", async (c) => {
   return c.redirect("/");
 });
 
+type RepoGql = {
+  autoMergeAllowed: boolean;
+  branchProtectionRules: { totalCount: number };
+  rulesets: { totalCount: number };
+} | null;
+
+function buildBatchQuery(repositories: { owner: { login: string }; name: string }[]) {
+  const varDeclarations = repositories
+    .map((_, i) => `$owner${i}: String!, $name${i}: String!`)
+    .join(", ");
+
+  const body = repositories
+    .map(
+      (_, i) =>
+        `r${i}: repository(owner: $owner${i}, name: $name${i}) {
+          autoMergeAllowed
+          branchProtectionRules(first: 1) { totalCount }
+          rulesets(first: 1) { totalCount }
+        }`,
+    )
+    .join("\n");
+
+  const variables = Object.fromEntries(
+    repositories.flatMap((repo, i) => [
+      [`owner${i}`, repo.owner.login],
+      [`name${i}`, repo.name],
+    ]),
+  );
+
+  return { query: `query BatchRepos(${varDeclarations}) { ${body} }`, variables };
+}
+
+async function fetchRepoGraphqlData(
+  app: App,
+  installationId: number,
+  repositories: { owner: { login: string }; name: string }[],
+): Promise<Record<string, RepoGql>> {
+  const installOctokit = await app.getInstallationOctokit(installationId);
+  const { query, variables } = buildBatchQuery(repositories);
+  return installOctokit.graphql<Record<string, RepoGql>>(query, variables);
+}
+
+function toSubStatuses(d: RepoGql): SubStatuses {
+  if (!d) return { autoMerge: null, hasProtection: null };
+  return {
+    autoMerge: d.autoMergeAllowed,
+    hasProtection:
+      d.branchProtectionRules.totalCount > 0 ||
+      d.rulesets.totalCount > 0,
+  };
+}
+
+function toRepoStatuses(
+  repositories: { owner: { login: string }; name: string; full_name: string }[],
+  gqlResult: Record<string, RepoGql>,
+): RepoStatus[] {
+  return repositories.map((repo, i) => {
+    const sub = toSubStatuses(gqlResult[`r${i}`] ?? null);
+    return {
+      owner: repo.owner.login,
+      name: repo.name,
+      fullName: repo.full_name,
+      subStatuses: sub,
+      status: computeStatus(sub),
+    };
+  });
+}
+
+const UNKNOWN_STATUSES: SubStatuses = { autoMerge: null, hasProtection: null };
+
+async function fetchInstallationRepos(
+  app: App,
+  userOctokit: Octokit,
+  installation: { id: number },
+): Promise<RepoStatus[]> {
+  const {
+    data: { repositories },
+  } = await userOctokit.rest.apps.listInstallationReposForAuthenticatedUser({
+    installation_id: installation.id,
+  });
+
+  if (repositories.length === 0) return [];
+
+  const gqlResult = await fetchRepoGraphqlData(app, installation.id, repositories)
+    .catch(() => null);
+
+  if (!gqlResult) {
+    return repositories.map((repo) => ({
+      owner: repo.owner.login,
+      name: repo.name,
+      fullName: repo.full_name,
+      subStatuses: UNKNOWN_STATUSES,
+      status: computeStatus(UNKNOWN_STATUSES),
+    }));
+  }
+
+  return toRepoStatuses(repositories, gqlResult);
+}
+
+async function fetchAllRepos(
+  app: App,
+  userOctokit: Octokit,
+): Promise<RepoStatus[]> {
+  const {
+    data: { installations },
+  } = await userOctokit.rest.apps.listInstallationsForAuthenticatedUser();
+
+  const nested = await Promise.all(
+    installations.map((inst) => fetchInstallationRepos(app, userOctokit, inst)),
+  );
+
+  return nested.flat().sort((a, b) => a.fullName.localeCompare(b.fullName));
+}
+
 dashboard.get("/", async (c) => {
-  const { token, login } = c.get("session");
+  const { token } = c.get("session");
 
   const app = new App({
     appId: c.env.APP_ID,
@@ -150,84 +259,15 @@ dashboard.get("/", async (c) => {
   });
   const userOctokit = await app.oauth.getUserOctokit({ token });
 
-  const repos: RepoStatus[] = [];
+  const [{ data: user }, repos] = await Promise.all([
+    userOctokit.rest.users.getAuthenticated(),
+    fetchAllRepos(app, userOctokit).catch((err) => {
+      console.error("Failed to fetch installations:", err);
+      return [] as RepoStatus[];
+    }),
+  ]);
 
-  try {
-    const {
-      data: { installations },
-    } = await userOctokit.rest.apps.listInstallationsForAuthenticatedUser();
-
-    for (const installation of installations) {
-      const {
-        data: { repositories },
-      } =
-        await userOctokit.rest.apps.listInstallationReposForAuthenticatedUser({
-          installation_id: installation.id,
-        });
-
-      if (repositories.length === 0) continue;
-
-      const installOctokit = await app.getInstallationOctokit(installation.id);
-
-      // Batch-query all repos in one GraphQL request using numeric aliases
-      const queryParts = repositories.map(
-        (repo, i) =>
-          `r${i}: repository(owner: ${JSON.stringify(repo.owner.login)}, name: ${JSON.stringify(repo.name)}) {
-            autoMergeAllowed
-            branchProtectionRules(first: 1) { totalCount }
-            rulesets(first: 1) { totalCount }
-          }`,
-      );
-
-      type RepoGql = {
-        autoMergeAllowed: boolean;
-        branchProtectionRules: { totalCount: number };
-        rulesets: { totalCount: number };
-      } | null;
-
-      let gqlResult: Record<string, RepoGql> = {};
-      let batchFailed = false;
-
-      try {
-        gqlResult = await installOctokit.graphql<Record<string, RepoGql>>(
-          `{ ${queryParts.join("\n")} }`,
-        );
-      } catch {
-        batchFailed = true;
-      }
-
-      for (let i = 0; i < repositories.length; i++) {
-        const repo = repositories[i];
-        let sub: SubStatuses;
-
-        if (batchFailed || !gqlResult[`r${i}`]) {
-          sub = { autoMerge: null, hasProtection: null };
-        } else {
-          const d = gqlResult[`r${i}`]!;
-          sub = {
-            autoMerge: d.autoMergeAllowed,
-            hasProtection:
-              d.branchProtectionRules.totalCount > 0 ||
-              d.rulesets.totalCount > 0,
-          };
-        }
-
-        repos.push({
-          owner: repo.owner.login,
-          name: repo.name,
-          fullName: repo.full_name,
-          subStatuses: sub,
-          status: computeStatus(sub),
-        });
-      }
-    }
-  } catch (err) {
-    console.error("Failed to fetch installations:", err);
-  }
-
-  repos.sort((a, b) => a.fullName.localeCompare(b.fullName));
-
-  return c.html(renderPage(login, repos));
+  return c.html(renderPage(user.login, repos));
 });
 
 function repoCard(repo: RepoStatus) {
