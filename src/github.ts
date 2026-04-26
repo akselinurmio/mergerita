@@ -25,7 +25,6 @@ export async function exchangeOAuthCode(
   clientId: string,
   clientSecret: string,
   code: string,
-  codeVerifier: string,
 ): Promise<string> {
   const resp = await fetch("https://github.com/login/oauth/access_token", {
     method: "POST",
@@ -34,7 +33,6 @@ export async function exchangeOAuthCode(
       client_id: clientId,
       client_secret: clientSecret,
       code,
-      code_verifier: codeVerifier,
     }),
   });
   if (!resp.ok) throw new Error("Token exchange failed");

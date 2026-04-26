@@ -37,24 +37,6 @@ const SESSION_COOKIE = "sid";
 const SESSION_TTL = 28800; // 8 hours
 const STATE_TTL = 600; // 10 minutes
 
-function base64urlEncode(bytes: Uint8Array): string {
-  let str = "";
-  for (const byte of bytes) str += String.fromCharCode(byte);
-  return btoa(str).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
-}
-
-function generateCodeVerifier(): string {
-  return base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
-}
-
-async function generateCodeChallenge(verifier: string): Promise<string> {
-  const hash = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(verifier),
-  );
-  return base64urlEncode(new Uint8Array(hash));
-}
-
 function computeStatus(sub: SubStatuses): OverallStatus {
   if (sub.autoMerge === null || sub.hasProtection === null) return "unknown";
   if (sub.autoMerge && sub.hasProtection) return "good";
@@ -152,16 +134,10 @@ dashboard.use("/*", async (c, next) => {
 
 dashboard.get("/login", async (c) => {
   const state = crypto.randomUUID();
-  const codeVerifier = generateCodeVerifier();
-  const codeChallenge = await generateCodeChallenge(codeVerifier);
 
-  await c.env.SESSIONS_KV.put(
-    `oauth_state:${state}`,
-    JSON.stringify({ codeVerifier }),
-    {
-      expirationTtl: STATE_TTL,
-    },
-  );
+  await c.env.SESSIONS_KV.put(`oauth_state:${state}`, "", {
+    expirationTtl: STATE_TTL,
+  });
 
   const reqUrl = new URL(c.req.url);
   const callbackUrl = `${reqUrl.protocol}//${reqUrl.host}/dashboard/callback`;
@@ -170,8 +146,6 @@ dashboard.get("/login", async (c) => {
   authUrl.searchParams.set("client_id", c.env.CLIENT_ID);
   authUrl.searchParams.set("state", state);
   authUrl.searchParams.set("redirect_uri", callbackUrl);
-  authUrl.searchParams.set("code_challenge", codeChallenge);
-  authUrl.searchParams.set("code_challenge_method", "S256");
 
   return c.redirect(authUrl.toString());
 });
@@ -183,10 +157,9 @@ dashboard.get("/callback", async (c) => {
   if (!code || !state) return c.text("Missing code or state", 400);
 
   const storedState = await c.env.SESSIONS_KV.get(`oauth_state:${state}`);
-  if (!storedState) return c.text("Invalid or expired OAuth state", 400);
+  if (storedState === null)
+    return c.text("Invalid or expired OAuth state", 400);
   await c.env.SESSIONS_KV.delete(`oauth_state:${state}`);
-
-  const { codeVerifier } = JSON.parse(storedState) as { codeVerifier: string };
 
   let accessToken: string;
   try {
@@ -194,7 +167,6 @@ dashboard.get("/callback", async (c) => {
       c.env.CLIENT_ID,
       c.env.CLIENT_SECRET,
       code,
-      codeVerifier,
     );
   } catch {
     return c.text(
