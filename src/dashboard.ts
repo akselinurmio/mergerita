@@ -9,13 +9,14 @@ import { App } from "octokit";
 import {
   exchangeOAuthCode,
   revokeOAuthToken,
-  fetchAuthenticatedLogin,
+  fetchAuthenticatedUser,
   fetchAllRepos,
 } from "./github";
-import type { RepoGql, RepoInfo } from "./github";
+import type { RepoGql, RepoInfo, GitHubUser } from "./github";
 
 interface Session {
   accessToken: string;
+  user: GitHubUser;
 }
 
 interface SubStatuses {
@@ -175,8 +176,16 @@ dashboard.get("/callback", async (c) => {
     );
   }
 
+  const app = new App({
+    appId: c.env.APP_ID,
+    privateKey: c.env.PRIVATE_KEY,
+    oauth: { clientId: c.env.CLIENT_ID, clientSecret: c.env.CLIENT_SECRET },
+  });
+  const userOctokit = await app.oauth.getUserOctokit({ token: accessToken });
+  const user = await fetchAuthenticatedUser(userOctokit);
+
   const sessionId = crypto.randomUUID();
-  const session: Session = { accessToken };
+  const session: Session = { accessToken, user };
   await c.env.SESSIONS_KV.put(`session:${sessionId}`, JSON.stringify(session), {
     expirationTtl: SESSION_TTL,
   });
@@ -210,7 +219,14 @@ dashboard.post("/logout", async (c) => {
 });
 
 dashboard.get("/", async (c) => {
-  const { accessToken } = c.get("session");
+  const session = c.get("session");
+
+  if (!session.user) {
+    await destroySession(c);
+    return c.redirect("/dashboard/login");
+  }
+
+  const { accessToken, user } = session;
 
   const app = new App({
     appId: c.env.APP_ID,
@@ -219,32 +235,14 @@ dashboard.get("/", async (c) => {
   });
   const userOctokit = await app.oauth.getUserOctokit({ token: accessToken });
 
-  const loginPromise = fetchAuthenticatedLogin(userOctokit);
-  const reposPromise = fetchAllRepos(app, userOctokit).catch((err) => {
+  const repoInfos = await fetchAllRepos(app, userOctokit).catch((err) => {
     console.error("Failed to fetch installations:", err);
     return [] as RepoInfo[];
   });
 
-  let login: string;
-  try {
-    login = await loginPromise;
-  } catch (err: unknown) {
-    const status = (err as { status?: number }).status;
-    if (status === 401) {
-      await destroySession(c);
-      return c.redirect("/dashboard/login");
-    }
-    return c.text(
-      "Something went wrong while loading your profile. Please try again later.",
-      500,
-    );
-  }
-
-  const repoInfos = await reposPromise;
-
   return c.html(
     renderPage(
-      login,
+      user.login,
       repoInfos.map(toRepoStatus),
       c.get("secureHeadersNonce") ?? "",
     ),

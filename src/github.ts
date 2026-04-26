@@ -64,11 +64,17 @@ export async function revokeOAuthToken(
   }
 }
 
-export async function fetchAuthenticatedLogin(
+export interface GitHubUser {
+  login: string;
+}
+
+export async function fetchAuthenticatedUser(
   octokit: Octokit,
-): Promise<string> {
-  const { data: user } = await octokit.rest.users.getAuthenticated();
-  return user.login;
+): Promise<GitHubUser> {
+  const { data } = await octokit.rest.users.getAuthenticated();
+  return {
+    login: data.login,
+  };
 }
 
 export type RepoGql = {
