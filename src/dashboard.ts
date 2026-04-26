@@ -103,6 +103,7 @@ dashboard.use(
   secureHeaders({
     contentSecurityPolicy: {
       defaultSrc: ["'none'"],
+      imgSrc: ["'self'"],
       styleSrc: [NONCE],
       frameAncestors: ["'none'"],
     },
