@@ -86,24 +86,31 @@ export interface RepoInfo {
   graphql: RepoGql;
 }
 
-async function fetchRepoGql(
+async function fetchReposGqlBatched(
   octokit: Octokit,
-  owner: string,
-  name: string,
-): Promise<RepoGql> {
+  repos: { owner: string; name: string }[],
+): Promise<Map<string, RepoGql>> {
+  if (repos.length === 0) return new Map();
+
+  const fragments = repos.map((r, i) => {
+    return `repo${i}: repository(owner: "${r.owner}", name: "${r.name}") {
+      autoMergeAllowed
+      branchProtectionRules(first: 1) { totalCount }
+      rulesets(first: 1) { totalCount }
+    }`;
+  });
+  const query = `query RepoStatusBatch { ${fragments.join("\n")} }`;
+
   const data = await octokit
-    .graphql<{ repository: RepoGql }>(
-      `query RepoStatus($owner: String!, $name: String!) {
-      repository(owner: $owner, name: $name) {
-        autoMergeAllowed
-        branchProtectionRules(first: 1) { totalCount }
-        rulesets(first: 1) { totalCount }
-      }
-    }`,
-      { owner, name },
-    )
+    .graphql<Record<string, RepoGql>>(query)
     .catch(() => null);
-  return data?.repository ?? null;
+
+  const result = new Map<string, RepoGql>();
+  for (let i = 0; i < repos.length; i++) {
+    const key = `${repos[i].owner}/${repos[i].name}`;
+    result.set(key, data?.[`repo${i}`] ?? null);
+  }
+  return result;
 }
 
 interface Installation {
@@ -144,24 +151,29 @@ export async function fetchAllRepos(
 ): Promise<RepoInfo[]> {
   const installations = await fetchUserInstallations(userOctokit);
 
-  const pending: Promise<RepoInfo>[] = [];
-  for (const install of installations) {
-    const installOctokit = await app.getInstallationOctokit(install.id);
-    for (const repo of install.repositories) {
-      pending.push(
-        fetchRepoGql(installOctokit, repo.owner.login, repo.name).then(
-          (graphql): RepoInfo => ({
-            owner: repo.owner.login,
-            name: repo.name,
-            fullName: repo.full_name,
-            graphql,
-          }),
-        ),
-      );
-    }
-  }
+  const allRepos: RepoInfo[] = [];
+  await Promise.all(
+    installations.map(async (install) => {
+      const installOctokit = await app.getInstallationOctokit(install.id);
 
-  const repos = await Promise.all(pending);
+      const repoKeys = install.repositories.map((r) => ({
+        owner: r.owner.login,
+        name: r.name,
+      }));
+      const gqlMap = await fetchReposGqlBatched(installOctokit, repoKeys);
+
+      for (const repo of install.repositories) {
+        const key = `${repo.owner.login}/${repo.name}`;
+        allRepos.push({
+          owner: repo.owner.login,
+          name: repo.name,
+          fullName: repo.full_name,
+          graphql: gqlMap.get(key) ?? null,
+        });
+      }
+    }),
+  );
+
   const collator = new Intl.Collator("und", { usage: "sort" });
-  return repos.sort((a, b) => collator.compare(a.fullName, b.fullName));
+  return allRepos.sort((a, b) => collator.compare(a.fullName, b.fullName));
 }

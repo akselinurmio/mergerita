@@ -247,9 +247,15 @@ dashboard.get("/", async (c) => {
   });
   const userOctokit = await app.oauth.getUserOctokit({ token: accessToken });
 
+  const loginPromise = fetchAuthenticatedLogin(userOctokit);
+  const reposPromise = fetchAllRepos(app, userOctokit).catch((err) => {
+    console.error("Failed to fetch installations:", err);
+    return [] as RepoInfo[];
+  });
+
   let login: string;
   try {
-    login = await fetchAuthenticatedLogin(userOctokit);
+    login = await loginPromise;
   } catch (err: unknown) {
     const status = (err as { status?: number }).status;
     if (status === 401) {
@@ -262,10 +268,7 @@ dashboard.get("/", async (c) => {
     );
   }
 
-  const repoInfos = await fetchAllRepos(app, userOctokit).catch((err) => {
-    console.error("Failed to fetch installations:", err);
-    return [] as RepoInfo[];
-  });
+  const repoInfos = await reposPromise;
 
   return c.html(
     renderPage(
